@@ -21,7 +21,7 @@ long min = INT_MAX;
 long max = INT_MIN;
 bool done = false;
 static unsigned long value = 0;
-
+int threads = 0;
 
 struct node
 {
@@ -33,33 +33,65 @@ typedef struct node linkedList;
 linkedList *head_node, *first_node, *temp_node = 0, *prev_node, next_node;
 int data;
 
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+//pthread_mutex_lock(&mutex);
+//pthread_mutex_unlock(&mutex);
+//pthread_mutex_destroy(&mutex);
+//free(thread_handle);
+
 
 // function prototypes
-void update(void* number);
+void update(long number);
 
 /*
  * update global aggregate variables given a number
- */
-void update(void* number)
+ *
+*/
+void update(long number)
 {
-    value = (unsigned long)number;
     // simulate computation
-    sleep(value);
+    sleep(number);
 
     // update aggregate variables
-    sum += value;
-    if (value % 2 == 1) 
+    sum += number;
+    if (number % 2 == 1) 
     {
         odd++;
     }
-    if (value < min) 
+    if (number < min) 
     {
-        min = value;
+        min = number;
     }
-    if (value > max) 
+    if (number > max) 
     {
-        max = value;
+        max = number;
     }
+}
+
+void* handle(void* num)
+{
+  int count = 0;
+  
+  temp_node = first_node;
+    
+  while (temp_node != 0)
+  {
+    count++;
+    temp_node = temp_node -> next;
+  }
+
+  count = count/threads;
+  temp_node = first_node;
+  pthread_mutex_lock(&mutex);
+  while (temp_node != 0 && count > 0) 
+  {
+    count--;
+    update(temp_node->value);
+    temp_node = temp_node -> next;
+  }
+  pthread_mutex_unlock(&mutex);
+
+  
 }
 
 int main(int argc, char* argv[])
@@ -71,7 +103,7 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
     char *fn = argv[1];
-    int threads = strtol(argv[2], NULL, 10);
+    threads = strtol(argv[2], NULL, 10);
     
     if (threads <=0)
     {
@@ -101,13 +133,16 @@ int main(int argc, char* argv[])
             // wait
             sleep(num);
         }
+        else 
+        {
+            printf("ERROR: Unrecognized action: '%c'\n", action);
+            exit(EXIT_FAILURE);
+        }
 
     }
-    display();
-    exit(EXIT_SUCCESS);
     for(int i = 0; i < threads; i++)
     {
-        pthread_create(&thread_handle[i], NULL, update, (void*)num);
+        pthread_create(&thread_handle[i], NULL, handle, (void*)num);
     }
     
 
@@ -115,11 +150,7 @@ int main(int argc, char* argv[])
     {
         pthread_join(thread_handle[i], NULL);
     }
-        /*else 
-        {
-            printf("ERROR: Unrecognized action: '%c'\n", action);
-            exit(EXIT_FAILURE);
-        }*/
+        
     
     fclose(fin);
 
@@ -127,6 +158,8 @@ int main(int argc, char* argv[])
     printf("%ld %ld %ld %ld\n", sum, odd, min, max);
 
     // clean up and return
+    pthread_mutex_destroy(&mutex);
+    free(thread_handle);
     return (EXIT_SUCCESS);
 }
 
@@ -147,17 +180,3 @@ void add(int num)
   temp_node->next = 0;
   head_node = temp_node;
 }
-
-/*void display()
-{
-  int count = 0;
-  temp_node = first_node;
-  printf("\nDisplay Linked List : \n");
-  while (temp_node != 0) {
-    printf("# %d # ", temp_node->value);
-    count++;
-    temp_node = temp_node -> next;
-  }
-  printf("\nNo Of Items In Linked List : %d\n", count);
-}*/
-
