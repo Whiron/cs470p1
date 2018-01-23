@@ -32,6 +32,7 @@ struct node
 typedef struct node linkedList;
 linkedList *head_node, *first_node, *temp_node = 0, *prev_node, next_node;
 int data;
+int count;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 //pthread_mutex_lock(&mutex);
@@ -70,27 +71,24 @@ void update(long number)
 
 void* handle(void* num)
 {
-  int count = 0;
-  
-  temp_node = first_node;
-    
-  while (temp_node != 0)
+  int pcount = count;
+  //temp_node = first_node;
+
+  /*while (temp_node != NULL)
   {
     count++;
     temp_node = temp_node -> next;
-  }
-
-  count = count/threads;
-  temp_node = first_node;
+  }*/
+  //printf("%d\n", pcount);
   pthread_mutex_lock(&mutex);
-  while (temp_node != 0 && count > 0) 
+  //temp_node = first_node;
+  while (temp_node != NULL && pcount > 0) 
   {
-    count--;
+    pcount--;
     update(temp_node->value);
     temp_node = temp_node -> next;
   }
   pthread_mutex_unlock(&mutex);
-
   
 }
 
@@ -115,8 +113,6 @@ int main(int argc, char* argv[])
     pthread_t *thread_handle;
     thread_handle = (pthread_t*)malloc(sizeof(pthread_t)*threads);
     
-    
-
     // load numbers and add them to the queue
     FILE* fin = fopen(fn, "r");
     char action;
@@ -127,6 +123,7 @@ int main(int argc, char* argv[])
         if (action == 'p') 
         {   // process
             add(num);
+            count++;
         } 
         else if (action == 'w') 
         {
@@ -140,6 +137,14 @@ int main(int argc, char* argv[])
         }
 
     }
+    if(count%threads == 0){
+      count = count/threads;
+    }
+    else{
+      count = (count/threads)+ 1;
+    }
+    
+    temp_node = first_node;
     for(int i = 0; i < threads; i++)
     {
         pthread_create(&thread_handle[i], NULL, handle, (void*)num);
@@ -151,7 +156,6 @@ int main(int argc, char* argv[])
         pthread_join(thread_handle[i], NULL);
     }
         
-    
     fclose(fin);
 
     // print results
