@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 // aggregate variables
 long sum = 0;
@@ -50,13 +51,19 @@ void update(long number);
 */
 void update(long number)
 {
+    
+    if(number == NULL)
+    {
+        return;
+    }
     // simulate computation
-    sleep(number);
-
+       sleep(number);
+    
     // update aggregate variables
+    
     sum += number;
     if (number % 2 == 1) 
-    {
+    {  
         odd++;
     }
     if (number < min) 
@@ -64,14 +71,17 @@ void update(long number)
         min = number;
     }
     if (number > max) 
-    {
+    {  
         max = number;
+        
     }
+    
+    return NULL;    
 }
 
-void* handle(void* num)
+void* handle(void* count)
 {
-  int pcount = count;
+  int pcount = (unsigned int)count;
   //temp_node = first_node;
 
   /*while (temp_node != NULL)
@@ -80,20 +90,50 @@ void* handle(void* num)
     temp_node = temp_node -> next;
   }*/
   //printf("%d\n", pcount);
-  pthread_mutex_lock(&mutex);
+  
   //temp_node = first_node;
+  
+  //pthread_mutex_lock(&mutex);
+    
+  //pthread_mutex_lock(&mutex);
   while (temp_node != NULL && pcount > 0) 
   {
+      
     pcount--;
+
+    
     update(temp_node->value);
-    temp_node = temp_node -> next;
-  }
-  pthread_mutex_unlock(&mutex);
+    //pthread_mutex_unlock(&mutex);
+    printf("PVALUE: %i\nVALUE: %i\n", pcount, temp_node->value);    
+    //pthread_mutex_unlock(&mutex);
+    if(temp_node->next == NULL)
+    {
+        return NULL;
+    }
+    else
+    { 
+        pthread_mutex_lock(&mutex);
+        temp_node = temp_node -> next;
+        pthread_mutex_unlock(&mutex);
+        
+    }
+    
+         
+  } 
+    
   
 }
 
 int main(int argc, char* argv[])
 {
+    // Time
+    struct timeval tv;
+    double start, end;
+    srand((unsigned)time(NULL));
+
+    gettimeofday(&tv, NULL);
+    start = tv.tv_sec+(tv.tv_usec/1000000.0);
+
     // check and parse command line options
     if (argc != 3) 
     {
@@ -137,17 +177,25 @@ int main(int argc, char* argv[])
         }
 
     }
-    if(count%threads == 0){
+
+    if(threads > count)
+    {
+        threads = count;
+    }
+    if(count%threads == 0)
+    {
       count = count/threads;
     }
-    else{
-      count = (count/threads)+ 1;
+    else
+    {
+      count = (count/threads)+ 1;      
     }
-    
+
     temp_node = first_node;
     for(int i = 0; i < threads; i++)
     {
-        pthread_create(&thread_handle[i], NULL, handle, (void*)num);
+        pthread_create(&thread_handle[i], NULL, handle, (void*)count);     
+        
     }
     
 
@@ -158,8 +206,12 @@ int main(int argc, char* argv[])
         
     fclose(fin);
 
+    gettimeofday(&tv, NULL);
+    end = tv.tv_sec+(tv.tv_usec/1000000.0);
+
     // print results
     printf("%ld %ld %ld %ld\n", sum, odd, min, max);
+    printf("Time Elapsed: %.31fs\n", end-start);
 
     // clean up and return
     pthread_mutex_destroy(&mutex);
