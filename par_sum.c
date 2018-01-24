@@ -2,8 +2,9 @@
  * par_sum.c
  *
  * CS 470 Project 1 (Pthreads)
- * Serial version
- *
+ * Parallel version
+ * Date: 1/26/18
+ * Authors: Georgia Corey, Justin Mikesell
  * Compile with --std=c99
  */
 
@@ -13,7 +14,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/time.h>
+#include <stdint.h>
 
 // aggregate variables
 long sum = 0;
@@ -21,9 +22,9 @@ long odd = 0;
 long min = INT_MAX;
 long max = INT_MIN;
 bool done = false;
-static unsigned long value = 0;
 int threads = 0;
 
+// Initialize list
 struct node
 {
     int value;
@@ -35,15 +36,14 @@ linkedList *head_node, *first_node, *temp_node = 0, *prev_node, next_node;
 int data;
 int count;
 
+// Initialize mutex
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-//pthread_mutex_lock(&mutex);
-//pthread_mutex_unlock(&mutex);
-//pthread_mutex_destroy(&mutex);
-//free(thread_handle);
 
 
 // function prototypes
 void update(long number);
+void* handle();
+void add(long num);
 
 /*
  * update global aggregate variables given a number
@@ -51,17 +51,12 @@ void update(long number);
 */
 void update(long number)
 {
-    
-    if(number == NULL)
-    {
-        return;
-    }
     // simulate computation
-       sleep(number);
+    sleep(number);
     
-    // update aggregate variables
-    
+    // update aggregate variables    
     sum += number;
+
     if (number % 2 == 1) 
     {  
         odd++;
@@ -75,65 +70,43 @@ void update(long number)
         max = number;
         
     }
-    
-    return NULL;    
+    return;    
 }
 
-void* handle(void* count)
+/*
+ * Processes threads to run the update function
+ * moving through the list of values.
+*/
+void* handle()
 {
-  int pcount = (unsigned int)count;
-  //temp_node = first_node;
+  // Copies count value into local variable.
+  int pcount = (uintptr_t)count;
+  long val;
 
-  /*while (temp_node != NULL)
+  // Go through the list until all required elements are done.
+  while (pcount > 0)
   {
-    count++;
+ 
+    pthread_mutex_lock(&mutex);
+    val = temp_node->value;     
+        
     temp_node = temp_node -> next;
-  }*/
-  //printf("%d\n", pcount);
-  
-  //temp_node = first_node;
-  
-  //pthread_mutex_lock(&mutex);
+    pthread_mutex_unlock(&mutex);
+    update(val);
+    pcount--; 
     
-  //pthread_mutex_lock(&mutex);
-  while (temp_node != NULL && pcount > 0) 
-  {
-      
-    pcount--;
-
-    
-    update(temp_node->value);
-    //pthread_mutex_unlock(&mutex);
-    printf("PVALUE: %i\nVALUE: %i\n", pcount, temp_node->value);    
-    //pthread_mutex_unlock(&mutex);
-    if(temp_node->next == NULL)
+    // Prevent possible seg faults.
+    if(temp_node == NULL)
     {
         return NULL;
-    }
-    else
-    { 
-        pthread_mutex_lock(&mutex);
-        temp_node = temp_node -> next;
-        pthread_mutex_unlock(&mutex);
-        
-    }
-    
-         
-  } 
-    
+    }    
+  }
+    return NULL; 
   
 }
 
 int main(int argc, char* argv[])
 {
-    // Time
-    struct timeval tv;
-    double start, end;
-    srand((unsigned)time(NULL));
-
-    gettimeofday(&tv, NULL);
-    start = tv.tv_sec+(tv.tv_usec/1000000.0);
-
     // check and parse command line options
     if (argc != 3) 
     {
@@ -177,11 +150,14 @@ int main(int argc, char* argv[])
         }
 
     }
-
+    
+    // Number of threads should not exceed number of elements in list.
     if(threads > count)
     {
         threads = count;
     }
+
+    // Split up work between threads evenly.
     if(count%threads == 0)
     {
       count = count/threads;
@@ -192,13 +168,15 @@ int main(int argc, char* argv[])
     }
 
     temp_node = first_node;
+    
+    // Make threads
     for(int i = 0; i < threads; i++)
     {
-        pthread_create(&thread_handle[i], NULL, handle, (void*)count);     
+        pthread_create(&thread_handle[i], NULL, handle,(void*)NULL);     
         
     }
     
-
+    // Kill threads
     for (int i = 0; i < threads; i++)
     {
         pthread_join(thread_handle[i], NULL);
@@ -206,12 +184,8 @@ int main(int argc, char* argv[])
         
     fclose(fin);
 
-    gettimeofday(&tv, NULL);
-    end = tv.tv_sec+(tv.tv_usec/1000000.0);
-
     // print results
     printf("%ld %ld %ld %ld\n", sum, odd, min, max);
-    printf("Time Elapsed: %.31fs\n", end-start);
 
     // clean up and return
     pthread_mutex_destroy(&mutex);
@@ -219,12 +193,20 @@ int main(int argc, char* argv[])
     return (EXIT_SUCCESS);
 }
 
-void add(int num)
+/*
+ * Add elements to linked list.
+*/
+void add(long num)
 {
+  
+  // Allocates memory for list
   temp_node = (linkedList *) malloc(sizeof (linkedList));
 
+  // Adds value into list
   temp_node->value = num;
 
+  // If the first node is empty, fill it. 
+  // Otherwise, go to next position in the list.
   if (first_node == 0) 
   {
     first_node = temp_node;
@@ -233,6 +215,7 @@ void add(int num)
   {
     head_node->next = temp_node;
   }
+  // Make the next position in the list empty.
   temp_node->next = 0;
   head_node = temp_node;
 }
