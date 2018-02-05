@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <mpi.h>
 
 // histogram bins
 #define BINS 10
@@ -29,6 +30,7 @@
     NAME ## _time = tv.tv_sec+(tv.tv_usec/1000000.0) - (NAME ## _time);
 #define GET_TIMER(NAME) (NAME##_time)
 
+
 // "count_t" used for number counts that could become quite high
 typedef unsigned long count_t;
 
@@ -36,6 +38,9 @@ int *nums;            // random numbers
 count_t  global_n;    // global "nums" count
 count_t  shift_n;     // global left shift offset
 count_t *hist;        // histogram (counts of "nums" in bins)
+int *scatteredNums;     // Scattered numbers
+int nprocs;
+int my_rank;
 
 /*
  * Parse and handle command-line parameters. Returns true if parameters were
@@ -60,6 +65,22 @@ bool parse_command_line(int argc, char *argv[])
 
     return true;
 }
+
+void dump_global_array(const char *label, int *arr, int size)
+{
+    int tmp[size*nprocs];
+    MPI_Gather(arr, size, MPI_INT,
+               tmp, size, MPI_INT, 0, MPI_COMM_WORLD);
+    if (my_rank == 0) {
+        printf("%20s: ", label);
+        for (int i = 0; i < size*nprocs; i++) {
+            printf("%2d ", tmp[i]);
+            
+        }
+        printf("\n");
+    }
+}
+     
 
 /*
  * Allocate and initialize number array and histogram.
@@ -137,10 +158,17 @@ void merge(int left[], count_t lsize, int right[], count_t rsize, int dest[])
  */
 void randomize()
 {
+
+    scatteredNums = (int*)calloc(global_n, sizeof(int));
     srand(42);
-    for (count_t i = 0; i < global_n; i++) {
+    for (count_t i = 0; i < global_n; i++) 
+    {
         nums[i] = rand() % RMAX;
     }
+    MPI_Scatter(nums, global_n/nprocs, MPI_INT,
+                scatteredNums, global_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    dump_global_array("Scatter Test - ", scatteredNums, nprocs);
 }
 
 /*
@@ -200,6 +228,10 @@ void merge_sort()
 
 int main(int argc, char *argv[])
 {
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
     // utility struct for timing calls
     struct timeval tv;
 
@@ -248,6 +280,7 @@ int main(int argc, char *argv[])
             GET_TIMER(rand), GET_TIMER(hist), GET_TIMER(shft), GET_TIMER(sort));
 
     // clean up and exit
+    MPI_Finalize();
     free(nums);
     free(hist);
     return EXIT_SUCCESS;
