@@ -21,7 +21,7 @@
 #define RMAX 100
 
 // enable debug output
-/*#define DEBUG*/
+#define DEBUG
 
 // timing macros (must first declare "struct timeval tv")
 #define START_TIMER(NAME) gettimeofday(&tv, NULL); \
@@ -165,10 +165,8 @@ void randomize()
     {
         nums[i] = rand() % RMAX;
     }
-    MPI_Scatter(nums, global_n/nprocs, MPI_INT,
+    MPI_Scatter(nums, global_n, MPI_INT,
                 scatteredNums, global_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    dump_global_array("Scatter Test - ", scatteredNums, nprocs);
 }
 
 /*
@@ -176,9 +174,15 @@ void randomize()
  */
 void histogram()
 {
-    for (count_t i = 0; i < global_n; i++) {
-        hist[nums[i] % BINS]++;
+    int *reducedNums = (int*)calloc(global_n, sizeof(int));
+    for (count_t i = 0; i < global_n/nprocs; i++)
+    {
+        hist[scatteredNums[i] % BINS]++;
     }
+
+    MPI_Reduce(hist, reducedNums, global_n, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        
+    
 }
 
 /*
