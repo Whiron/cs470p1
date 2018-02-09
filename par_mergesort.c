@@ -178,13 +178,13 @@ void randomize()
  */
 void histogram()
 {
+    count_t *lhist = (count_t*)calloc(BINS, sizeof(count_t));
     for (count_t i = 0; i < global_n/nprocs; i++)
     {
-        hist[scatteredNums[i] % BINS]++;
+        lhist[scatteredNums[i] % BINS]++;
     }
-    MPI_Gather(hist, global_n/nprocs, MPI_INT, nums, global_n/nprocs, MPI_INT, 0, MPI_COMM_WORLD);
-        
-    
+    MPI_Reduce(lhist, hist, BINS*2, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    printf("RANK %d", my_rank);
 }
 
 /*
