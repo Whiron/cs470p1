@@ -21,7 +21,7 @@
 #define RMAX 100
 
 // enable debug output
-#define DEBUG
+//#define DEBUG
 
 // timing macros (must first declare "struct timeval tv")
 #define START_TIMER(NAME) gettimeofday(&tv, NULL); \
@@ -49,36 +49,31 @@ int my_rank;
 bool parse_command_line(int argc, char *argv[])
 {
     // read command-line parameters
-    if (argc != 3) {
+    if (argc != 3) 
+    {
         printf("Usage: %s <n> <shift>\n", argv[0]);
         return false;
-    } else {
+    } 
+    
+    else  
+    {
         global_n = strtol(argv[1], NULL, 10);
         shift_n  = strtol(argv[2], NULL, 10);
     }
 
     // check shift offset
-    if (shift_n > global_n) {
+    if (shift_n > global_n) 
+    {
         printf("ERROR: shift offset cannot be greater than N\n");
+        return false;
+    }
+    if(global_n % shift_n != 0)
+    {
+        printf("ERROR: N and shift offsets must be evenly divisible");
         return false;
     }
 
     return true;
-}
-
-void dump_global_array(const char *label, int *arr, int size)
-{
-    int tmp[size*nprocs];
-    MPI_Gather(arr, size, MPI_INT,
-               tmp, size, MPI_INT, 0, MPI_COMM_WORLD);
-    if (my_rank == 0) {
-        printf("%20s: ", label);
-        for (int i = 0; i < size*nprocs; i++) {
-            printf("%2d ", tmp[i]);
-            
-        }
-        printf("\n");
-    }
 }
      
 
@@ -89,12 +84,14 @@ void initialize_data_structures()
 {
     // initialize local data structures
     nums = (int*)calloc(global_n, sizeof(int));
-    if (nums == NULL) {
+    if (nums == NULL) 
+    {
         fprintf(stderr, "Out of memory!\n");
         exit(EXIT_FAILURE);
     }
     hist = (count_t*)calloc(BINS, sizeof(count_t));
-    if (hist == NULL) {
+    if (hist == NULL) 
+    {
         fprintf(stderr, "Out of memory!\n");
         exit(EXIT_FAILURE);
     }
@@ -113,7 +110,8 @@ int cmp(const void* a, const void* b)
  */
 void print_nums(int *a, count_t n)
 {
-    for (count_t i = 0; i < n; i++) {
+    for (count_t i = 0; i < n; i++) 
+    {
         printf("%d ", a[i]);
     }
     printf("\n");
@@ -124,7 +122,8 @@ void print_nums(int *a, count_t n)
  */
 void print_counts(count_t *a, count_t n)
 {
-    for (count_t i = 0; i < n; i++) {
+    for (count_t i = 0; i < n; i++) 
+    {
         printf("%lu ", a[i]);
     }
     printf("\n");
@@ -137,15 +136,20 @@ void merge(int left[], count_t lsize, int right[], count_t rsize, int dest[])
 {
     count_t dsize = lsize + rsize;
     int *tmp = (int*)malloc(sizeof(int) * dsize);
-    if (tmp == NULL) {
+    if (tmp == NULL) 
+    {
         fprintf(stderr, "Out of memory!\n");
         exit(EXIT_FAILURE);
     }
     count_t l = 0, r = 0;
-    for (count_t ti = 0; ti < dsize; ti++) {
-        if (l < lsize && (left[l] <= right[r] || r >= rsize)) {
+    for (count_t ti = 0; ti < dsize; ti++) 
+    {
+        if (l < lsize && (left[l] <= right[r] || r >= rsize)) 
+        {
             tmp[ti] = left[l++];
-        } else {
+        } 
+        else 
+        {
             tmp[ti] = right[r++];
         }
     }
@@ -165,8 +169,8 @@ void randomize()
     {
         nums[i] = rand() % RMAX;
     }
-    MPI_Scatter(nums, global_n, MPI_INT,
-                scatteredNums, global_n, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatter(nums, global_n/nprocs, MPI_INT,
+                scatteredNums, global_n/nprocs, MPI_INT, my_rank, MPI_COMM_WORLD);
 }
 
 /*
@@ -174,13 +178,11 @@ void randomize()
  */
 void histogram()
 {
-    int *reducedNums = (int*)calloc(global_n, sizeof(int));
     for (count_t i = 0; i < global_n/nprocs; i++)
     {
         hist[scatteredNums[i] % BINS]++;
     }
-
-    MPI_Reduce(hist, reducedNums, global_n, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Gather(hist, global_n/nprocs, MPI_INT, nums, global_n/nprocs, MPI_INT, 0, MPI_COMM_WORLD);
         
     
 }
@@ -193,18 +195,24 @@ void shift_left()
 {
     // preserve first shift_n values
     int *tmp = (int*)malloc(sizeof(int) * shift_n);
-    for (count_t i = 0; i < shift_n; i++) {
+    for (count_t i = 0; i < shift_n; i++) 
+    {
         tmp[i] = nums[i];
     }
 
     // perform shift
-    for (count_t i = 0; i < global_n-shift_n; i++) {
+    for (count_t i = 0; i < global_n-shift_n; i++) 
+    {
         nums[i] = nums[(i + shift_n) % global_n];
     }
-    for (count_t i = 0; i < shift_n; i++) {
+    for (count_t i = 0; i < shift_n; i++) 
+    {
         nums[i + global_n - shift_n] = tmp[i];
     }
+    MPI_Sendrecv(tmp, global_n/nprocs, MPI_INT, my_rank, my_rank,
+                 nums, global_n, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     free(tmp);
+    
 }
 
 /*
@@ -212,9 +220,12 @@ void shift_left()
  */
 void merge_sort_helper(int *start, count_t len)
 {
-    if (len < 100) {
+    if (len < 100) 
+    {
         qsort(start, len, sizeof(int), cmp);
-    } else {
+    }
+    else 
+    {
         count_t mid = len/2;
         merge_sort_helper(start, mid);
         merge_sort_helper(start+mid, len-mid);
@@ -227,7 +238,10 @@ void merge_sort_helper(int *start, count_t len)
  */
 void merge_sort()
 {
-    merge_sort_helper(nums, global_n);
+    qsort(nums, global_n/nprocs, sizeof(int), cmp);  
+    //MPI_Recv(nums, global_n/nprocs, MPI_INT, MPI_ANY_SOURCE, 
+            //MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
+     
 }
 
 int main(int argc, char *argv[])
@@ -239,7 +253,9 @@ int main(int argc, char *argv[])
     // utility struct for timing calls
     struct timeval tv;
 
-    if (!parse_command_line(argc, argv)) {
+    if (!parse_command_line(argc, argv)) 
+    {
+        MPI_Finalize();
         exit(EXIT_FAILURE);
     }
 
