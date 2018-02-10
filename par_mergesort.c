@@ -21,7 +21,7 @@
 #define RMAX 100
 
 // enable debug output
-//#define DEBUG
+#define DEBUG
 
 // timing macros (must first declare "struct timeval tv")
 #define START_TIMER(NAME) gettimeofday(&tv, NULL); \
@@ -193,7 +193,7 @@ void histogram()
  */
 void shift_left()
 {
-int left, right;
+    int left, right;
     MPI_Status status;
     // preserve first shift_n values
     int *tmp = (int*)malloc(sizeof(int) * shift_n);
@@ -247,10 +247,12 @@ void merge_sort_helper(int *start, count_t len)
  */
 void merge_sort()
 {
-    qsort(nums, global_n/nprocs, sizeof(int), cmp);  
-    //MPI_Recv(nums, global_n/nprocs, MPI_INT, MPI_ANY_SOURCE, 
-            //MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
-     
+    qsort(nums, global_n, sizeof(int), cmp);
+    merge(nums, global_n/nprocs, nums+(global_n/nprocs), global_n-(global_n/nprocs), nums);
+    MPI_Gather(nums, global_n, MPI_INT,
+                hist, global_n, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    
 }
 
 int main(int argc, char *argv[])
