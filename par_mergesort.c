@@ -67,10 +67,12 @@ bool parse_command_line(int argc, char *argv[])
         printf("ERROR: shift offset cannot be greater than N\n");
         return false;
     }
-    if(global_n % shift_n != 0)
-    {
-        printf("ERROR: N and shift offsets must be evenly divisible");
-        return false;
+    if(shift_n > 0){
+        if(global_n % shift_n != 0)
+        {
+            printf("ERROR: N and shift offsets must be evenly divisible");
+            return false;
+        }
     }
 
     return true;
