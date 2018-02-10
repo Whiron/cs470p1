@@ -1,10 +1,10 @@
 /*
- * mergesort.c
+ * par_mergesort.c
  *
  * CS 470 Project 2 (MPI)
  * Original serial version.
  *
- * Name(s): 
+ * Name(s): Georgia Corey and Justin Mikesell
  */
 
 #include <stdbool.h>
@@ -83,7 +83,7 @@ bool parse_command_line(int argc, char *argv[])
 void initialize_data_structures()
 {
     // initialize local data structures
-    nums = (int*)calloc(global_n, sizeof(int));
+    nums = (int*)calloc(global_n/nprocs, sizeof(int));
     if (nums == NULL) 
     {
         fprintf(stderr, "Out of memory!\n");
