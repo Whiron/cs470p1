@@ -193,24 +193,33 @@ void histogram()
  */
 void shift_left()
 {
+int left, right;
+    MPI_Status status;
     // preserve first shift_n values
     int *tmp = (int*)malloc(sizeof(int) * shift_n);
-    for (count_t i = 0; i < shift_n; i++) 
+    int *tmpNums = (int*)calloc(global_n, sizeof(int));
+    for (count_t i = 0; i < shift_n; i++)
     {
         tmp[i] = nums[i];
     }
 
     // perform shift
-    for (count_t i = 0; i < global_n-shift_n; i++) 
+    for (count_t i = 0; i < global_n-shift_n; i++)
     {
-        nums[i] = nums[(i + shift_n) % global_n];
+        tmpNums[i] = nums[(i + shift_n) % global_n];
     }
-    for (count_t i = 0; i < shift_n; i++) 
+    for (count_t i = 0; i < shift_n; i++)
     {
-        nums[i + global_n - shift_n] = tmp[i];
+        tmpNums[i + global_n - shift_n] = tmp[i];
     }
-    MPI_Sendrecv(tmp, global_n/nprocs, MPI_INT, my_rank, my_rank,
-                 nums, global_n, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    right = (my_rank -1)% nprocs;
+    left = my_rank - 1;
+    if(left < 0)
+    {
+        left = nprocs - 1;
+    }
+    MPI_Sendrecv(tmpNums, global_n, MPI_INT, left, 0,
+                 nums, global_n, MPI_INT, right, 0, MPI_COMM_WORLD, &status);
     free(tmp);
     
 }
