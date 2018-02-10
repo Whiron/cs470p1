@@ -289,7 +289,10 @@ int main(int argc, char *argv[])
 
     // perform left shift
     START_TIMER(shft)
-    shift_left();
+    if(shift_n > 0)
+    { 
+      shift_left();
+    }
     STOP_TIMER(shft)
 
 #   ifdef DEBUG
