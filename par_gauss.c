@@ -44,7 +44,9 @@ bool triangular_mode = false;
  */
 void rand_system()
 {
-#pragma omp parallel default(none) shared(A, x, b,triangular_mode ,n)
+#pragma omp parallel default(none) \
+ shared(x,n, triangular_mode) \
+ private(A,b)
  {
  // allocate space for matrices
     A = (REAL*)calloc(n*n, sizeof(REAL));
@@ -142,7 +144,7 @@ void read_system(const char *fn)
  */
 void gaussian_elimination()
 {
-    #pragma omp parallel default(none) shared(A, n, b)
+    #pragma omp parallel default(none) shared(n) private(A, b)
     {
     #pragma omp for
     for (int pivot = 0; pivot < n; pivot++) {
@@ -164,7 +166,7 @@ void gaussian_elimination()
  */
 void back_substitution_row()
 {
-    #pragma omp parallel default(none) shared(A, n, x, b)
+    #pragma omp parallel default(none) shared(A, n, b) private(x)
     {
     REAL tmp;
     #pragma omp for
@@ -184,7 +186,7 @@ void back_substitution_row()
  */
 void back_substitution_column()
 {
-#pragma omp parallel default(none) shared(n, A, x,b)
+#pragma omp parallel default(none) shared(n, A, b) private(x)
     {
     #pragma omp for
     for (int row = 0; row < n; row++) {
