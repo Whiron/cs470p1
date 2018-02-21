@@ -1,321 +1,309 @@
 /*
- * par_mergesort.c
+ * par_gauss.c
  *
- * CS 470 Project 2 (MPI)
- * Original serial version.
+ * CS 470 Project 3 (OpenMP)
+ * OpenMP parallelized version
  *
- * Name(s): Georgia Corey and Justin Mikesell
+ * Compile with --std=c99
  */
 
+#include <getopt.h>
+#include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
-#include <sys/time.h>
-#include <mpi.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+// custom timing macros
+#include "omp_timer.h"
 
-// histogram bins
-#define BINS 10
+// uncomment this line to enable the alternative back substitution method
+/*#define USE_COLUMN_BACKSUB*/
 
-// maximum random number
-#define RMAX 100
+// use 64-bit IEEE arithmetic (change to "float" to use 32-bit arithmetic)
+#define REAL double
 
-// enable debug output
-#define DEBUG
+// linear system: Ax = b    (A is n x n matrix; b and x are n x 1 vectors)
+int n;
+REAL *A;
+REAL *x;
+REAL *b;
 
-// timing macros (must first declare "struct timeval tv")
-#define START_TIMER(NAME) gettimeofday(&tv, NULL); \
-    double NAME ## _time = tv.tv_sec+(tv.tv_usec/1000000.0);
-#define STOP_TIMER(NAME) gettimeofday(&tv, NULL); \
-    NAME ## _time = tv.tv_sec+(tv.tv_usec/1000000.0) - (NAME ## _time);
-#define GET_TIMER(NAME) (NAME##_time)
+// enable/disable debugging output (don't enable for large matrix sizes!)
+bool debug_mode = false;
 
-
-// "count_t" used for number counts that could become quite high
-typedef unsigned long count_t;
-
-int *nums;            // random numbers
-count_t  global_n;    // global "nums" count
-count_t  shift_n;     // global left shift offset
-count_t *hist;        // histogram (counts of "nums" in bins)
-int *scatteredNums;     // Scattered numbers
-int nprocs;
-int my_rank;
+// enable/disable triangular mode (to skip the Gaussian elimination phase)
+bool triangular_mode = false;
 
 /*
- * Parse and handle command-line parameters. Returns true if parameters were
- * valid; false if not.
+ * Generate a random linear system of size n.
  */
-bool parse_command_line(int argc, char *argv[])
+void rand_system()
 {
-    // read command-line parameters
-    if (argc != 3) 
-    {
-        printf("Usage: %s <n> <shift>\n", argv[0]);
-        return false;
-    } 
-    
-    else  
-    {
-        global_n = strtol(argv[1], NULL, 10);
-        shift_n  = strtol(argv[2], NULL, 10);
+ // allocate space for matrices
+    A = (REAL*)calloc(n*n, sizeof(REAL));
+    b = (REAL*)calloc(n,   sizeof(REAL));
+    x = (REAL*)calloc(n,   sizeof(REAL));
+
+    // verify that memory allocation succeeded
+    if (A == NULL || b == NULL || x == NULL) {
+        printf("Unable to allocate memory for linear system\n");
+        exit(EXIT_FAILURE);
     }
 
-    // check shift offset
-    if (shift_n > global_n) 
+    // initialize pseudorandom number generator
+    // (see https://en.wikipedia.org/wiki/Linear_congruential_generator)
+    #pragma omp parallel default(none) \
+    shared(A,b, x, n, triangular_mode)
     {
-        printf("ERROR: shift offset cannot be greater than N\n");
-        return false;
-    }
-    if(shift_n > 0){
-        if(global_n % shift_n != 0)
-        {
-            printf("ERROR: N and shift offsets must be evenly divisible");
-            return false;
+
+    unsigned long seed;
+#ifdef _OPENMP
+    seed = omp_get_thread_num();
+#else
+    seed = 0;
+#endif
+    // generate random matrix entries
+    #pragma omp for
+    for (int row = 0; row < n; row++) {
+        int col = triangular_mode ? row : 0;
+       for (; col < n; col++) {
+            if (row != col) {
+                seed = (1103515245*seed + 12345) % (1<<31);
+                A[row*n + col] = (REAL)seed / (REAL)ULONG_MAX;
+            }
+            else {
+                A[row*n + col] = n/10.0;
+            }
         }
     }
 
-    return true;
-}
-     
-
-/*
- * Allocate and initialize number array and histogram.
- */
-void initialize_data_structures()
-{
-    // initialize local data structures
-    nums = (int*)calloc(global_n/nprocs, sizeof(int));
-    if (nums == NULL) 
-    {
-        fprintf(stderr, "Out of memory!\n");
-        exit(EXIT_FAILURE);
-    }
-    hist = (count_t*)calloc(BINS, sizeof(count_t));
-    if (hist == NULL) 
-    {
-        fprintf(stderr, "Out of memory!\n");
-        exit(EXIT_FAILURE);
-    }
-}
-
-/*
- * Compares two ints. Suitable for calls to standard qsort routine.
- */
-int cmp(const void* a, const void* b)
-{
-    return *(int*)a - *(int*)b;
-}
-
-/*
- * Print contents of an int list.
- */
-void print_nums(int *a, count_t n)
-{
-    for (count_t i = 0; i < n; i++) 
-    {
-        printf("%d ", a[i]);
-    }
-    printf("\n");
-}
-
-/*
- * Print contents of a count list (i.e., histogram).
- */
-void print_counts(count_t *a, count_t n)
-{
-    for (count_t i = 0; i < n; i++) 
-    {
-        printf("%lu ", a[i]);
-    }
-    printf("\n");
-}
-
-/*
- * Merge two sorted lists ("left" and "right) into "dest" using temp storage.
- */
-void merge(int left[], count_t lsize, int right[], count_t rsize, int dest[])
-{
-    count_t dsize = lsize + rsize;
-    int *tmp = (int*)malloc(sizeof(int) * dsize);
-    if (tmp == NULL) 
-    {
-        fprintf(stderr, "Out of memory!\n");
-        exit(EXIT_FAILURE);
-    }
-    count_t l = 0, r = 0;
-    for (count_t ti = 0; ti < dsize; ti++) 
-    {
-        if (l < lsize && (left[l] <= right[r] || r >= rsize)) 
-        {
-            tmp[ti] = left[l++];
-        } 
-        else 
-        {
-            tmp[ti] = right[r++];
+    // generate right-hand side such that the solution matrix is all 1s
+    #pragma omp for
+    for (int row = 0; row < n; row++) {
+        b[row] = 0.0;
+        for (int col = 0; col < n; col++) {
+            b[row] += A[row*n + col] * 1.0;
         }
     }
-    memcpy(dest, tmp, dsize*sizeof(int));
-    free(tmp);
+ }
 }
 
 /*
- * Generate random integers for "nums".
+ * Reads a linear system of equations from a file in the form of an augmented
+ * matrix [A][b].
  */
-void randomize()
+void read_system(const char *fn)
 {
-
-    scatteredNums = (int*)calloc(global_n, sizeof(int));
-    srand(42);
-    for (count_t i = 0; i < global_n; i++) 
-    {
-        nums[i] = rand() % RMAX;
+    // open file and read matrix dimensions
+    FILE* fin = fopen(fn, "r");
+    if (fin == NULL) {
+        printf("Unable to open file \"%s\"\n", fn);
+        exit(EXIT_FAILURE);
     }
-    MPI_Scatter(nums, global_n/nprocs, MPI_INT,
-                scatteredNums, global_n/nprocs, MPI_INT, my_rank, MPI_COMM_WORLD);
-}
-
-/*
- * Calculate histogram based on contents of "nums".
- */
-void histogram()
-{
-    count_t *lhist = (count_t*)calloc(BINS, sizeof(count_t));
-    for (count_t i = 0; i < global_n/nprocs; i++)
-    {
-        lhist[scatteredNums[i] % BINS]++;
+    if (fscanf(fin, "%d\n", &n) != 1) {
+        printf("Invalid matrix file format\n");
+        exit(EXIT_FAILURE);
     }
-    MPI_Reduce(lhist, hist, BINS*2, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-    printf("RANK %d", my_rank);
-}
 
-/*
- * Shift "nums" left by the given number of slots. Anything shifted off the left
- * side should rotate around to the end, so no numbers are lost.
- */
-void shift_left()
-{
-     int left;
-     MPI_Status status;
-     // preserve first shift_n values
-     int *tmp = (int*)malloc(sizeof(int) * shift_n);
-     for (count_t i = 0; i < shift_n; i++)
-     {
-         tmp[i] = nums[i];
-     }
- 
-     // perform shift
-     for (count_t i = 0; i < global_n-shift_n; i++)
-     {
-         nums[i] = nums[(i + shift_n) % global_n];
-     }
-     for (count_t i = 0; i < shift_n; i++)
-     {
-          nums[i + global_n - shift_n] = tmp[i];
-     }
-     left = my_rank - 1;
-     if(left < 0)
-     {
-         left = nprocs - 1;
-     }
-     MPI_Sendrecv(nums, global_n/nprocs, MPI_INT, left, 0,
-                     nums, global_n/nprocs, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-    free(tmp);
-    
-}
+    // allocate space for matrices
+    A = (REAL*)malloc(sizeof(REAL) * n*n);
+    b = (REAL*)malloc(sizeof(REAL) * n);
+    x = (REAL*)malloc(sizeof(REAL) * n);
 
-/*
- * Merge sort helper (shouldn't be necessary in parallel version).
- */
-void merge_sort_helper(int *start, count_t len)
-{
-    if (len < 100) 
-    {
-        qsort(start, len, sizeof(int), cmp);
+    // verify that memory allocation succeeded
+    if (A == NULL || b == NULL || x == NULL) {
+        printf("Unable to allocate memory for linear system\n");
+        exit(EXIT_FAILURE);
     }
-    else 
-    {
-        count_t mid = len/2;
-        merge_sort_helper(start, mid);
-        merge_sort_helper(start+mid, len-mid);
-        merge(start, mid, start+mid, len-mid, start);
+
+    // read all values
+    for (int row = 0; row < n; row++) {
+        for (int col = 0; col < n; col++) {
+            if (fscanf(fin, "%lf", &A[row*n + col]) != 1) {
+                printf("Invalid matrix file format\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (fscanf(fin, "%lf", &b[row]) != 1) {
+            printf("Invalid matrix file format\n");
+            exit(EXIT_FAILURE);
+        }
+        x[row] = 0.0;     // initialize x while we're reading A and b
+    }
+    fclose(fin);
+}
+
+/*
+ * Performs Gaussian elimination on the linear system.
+ * Assumes the matrix is singular and doesn't require any pivoting.
+ */
+void gaussian_elimination()
+{
+//#pragma omp parallel for default(none) \
+    //shared(n, b, A)
+    for (int pivot = 0; pivot < n; pivot++) {
+       #pragma omp parallel for default(none) shared(A, b, n, pivot)
+       for (int row = pivot+1; row < n; row++) {
+            REAL coeff = A[row*n + pivot] / A[pivot*n + pivot];
+            A[row*n + pivot] = 0.0;
+            for (int col = pivot+1; col < n; col++) {
+                A[row*n + col] -= A[pivot*n + col] * coeff;
+            }
+            b[row] -= b[pivot] * coeff;
+        }
     }
 }
 
 /*
- * Sort "nums" using the mergesort algorithm.
+ * Performs backwards substitution on the linear system.
+ * (row-oriented version)
  */
-void merge_sort()
+void back_substitution_row()
 {
-    qsort(nums, global_n, sizeof(int), cmp);
-    merge(nums, global_n/nprocs, nums+(global_n/nprocs), global_n-(global_n/nprocs), nums);
-    MPI_Gather(nums, global_n, MPI_INT,
-                hist, global_n, MPI_INT, 0, MPI_COMM_WORLD);
-    
-    
+    REAL tmp;
+    #pragma omp for
+    for (int row = n-1; row >= 0; row--) {
+        tmp = b[row];
+        for (int col = row+1; col < n; col++) {
+            tmp += -A[row*n + col] * x[col];
+        }
+        x[row] = tmp / A[row*n + row];
+    }
+}
+
+/*
+ * Performs backwards substitution on the linear system.
+ * (column-oriented version)
+ */
+void back_substitution_column()
+{
+    #pragma omp for
+    for (int row = 0; row < n; row++) {
+        x[row] = b[row];
+    }
+    #pragma omp for
+    for (int col = n-1; col >= 0; col--) {
+        x[col] /= A[col*n + col];
+        for (int row = 0; row < col; row++) {
+            x[row] += -A[row*n + col] * x[col];
+        }
+    }
+}
+
+/*
+ * Find the maximum error in the solution (only works for randomly-generated
+ * matrices).
+ */
+REAL find_max_error()
+{
+    REAL error = 0.0, tmp;
+    for (int row = 0; row < n; row++) {
+        tmp = fabs(x[row] - 1.0);
+        if (tmp > error) {
+            error = tmp;
+        }
+    }
+    return error;
+}
+
+/*
+ * Prints a matrix to standard output in a fixed-width format.
+ */
+void print_matrix(REAL *mat, int rows, int cols)
+{
+    for (int row = 0; row < rows; row++) {
+        for (int col = 0; col < cols; col++) {
+            printf("%8.1e ", mat[row*cols + col]);
+        }
+        printf("\n");
+    }
 }
 
 int main(int argc, char *argv[])
 {
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-
-    // utility struct for timing calls
-    struct timeval tv;
-
-    if (!parse_command_line(argc, argv)) 
-    {
-        MPI_Finalize();
+    // check and parse command line options
+    int threads;
+    #ifdef _OPENMP
+    threads = omp_get_max_threads();
+    #else
+    threads = 0;
+    #endif
+    int c;
+    while ((c = getopt(argc, argv, "dt")) != -1) {
+        switch (c) {
+        case 'd':
+            debug_mode = true;
+            break;
+        case 't':
+            triangular_mode = true;
+            break;
+        default:
+            printf("Usage: %s [-dt] <file|size>\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (optind != argc-1) {
+        printf("Usage: %s [-dt] <file|size>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    initialize_data_structures();
-
-    // initialize random numbers
-    START_TIMER(rand)
-    randomize();
-    STOP_TIMER(rand)
-
-#   ifdef DEBUG
-    printf("global orig list: "); print_nums(nums, global_n);
-#   endif
-
-    // compute histogram
-    START_TIMER(hist)
-    histogram();
-    STOP_TIMER(hist)
-
-    // print histogram
-    printf("GLOBAL hist: "); print_counts(hist, BINS);
-
-    // perform left shift
-    START_TIMER(shft)
-    if(shift_n > 0)
-    { 
-      shift_left();
+    // read or generate linear system
+    long int size = strtol(argv[optind], NULL, 10);
+    START_TIMER(init)
+    if (size == 0) {
+        read_system(argv[optind]);
+    } else {
+        n = (int)size;
+        rand_system();
     }
-    STOP_TIMER(shft)
+    STOP_TIMER(init)
 
-#   ifdef DEBUG
-    printf("global shft list: "); print_nums(nums, global_n);
+    if (debug_mode) {
+        printf("Original A = \n");
+        print_matrix(A, n, n);
+        printf("Original b = \n");
+        print_matrix(b, n, 1);
+    }
+
+    // perform gaussian elimination
+    START_TIMER(gaus)
+    if (!triangular_mode) {
+        gaussian_elimination();
+    }
+    STOP_TIMER(gaus)
+
+    // perform backwards substitution
+    START_TIMER(bsub)
+#   ifndef USE_COLUMN_BACKSUB
+    back_substitution_row();
+#   else
+    back_substitution_column();
 #   endif
+    STOP_TIMER(bsub)
 
-    // perform merge sort
-    START_TIMER(sort)
-    merge_sort();
-    STOP_TIMER(sort)
+    if (debug_mode) {
+        printf("Triangular A = \n");
+        print_matrix(A, n, n);
+        printf("Updated b = \n");
+        print_matrix(b, n, 1);
+        printf("Solution x = \n");
+        print_matrix(x, n, 1);
+    }
 
-    // print global results
-#   ifdef DEBUG
-    printf("GLOBAL list: "); print_nums(nums, global_n);
-#   endif
-    printf("RAND: %.4f  HIST: %.4f  SHFT: %.4f  SORT: %.4f\n",
-            GET_TIMER(rand), GET_TIMER(hist), GET_TIMER(shft), GET_TIMER(sort));
+    // print results
+    printf("Nthreads=%2d  ERR=%8.1e  INIT: %8.4fs  GAUS: %8.4fs  BSUB: %8.4fs\n",
+            threads, find_max_error(),
+            GET_TIMER(init), GET_TIMER(gaus), GET_TIMER(bsub));
 
     // clean up and exit
-    MPI_Finalize();
-    free(nums);
-    free(hist);
+    free(A);
+    free(b);
+    free(x);
     return EXIT_SUCCESS;
 }
+
