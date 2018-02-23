@@ -3,7 +3,7 @@
  *
  * CS 470 Project 3 (OpenMP)
  * OpenMP parallelized version
- *
+ * Authors: Georgia Corey & Justin Mikesell
  * Compile with --std=c99
  */
 
@@ -57,10 +57,13 @@ void rand_system()
 
     // initialize pseudorandom number generator
     // (see https://en.wikipedia.org/wiki/Linear_congruential_generator)
+ 
+    // Parallelize the function
     #pragma omp parallel default(none) \
     shared(A,b, x, n, triangular_mode)
     {
-
+// Assign seed to its own thread if OpenMP is running
+// Otherwise, initialize seed to 0.
     unsigned long seed;
 #ifdef _OPENMP
     seed = omp_get_thread_num();
@@ -68,6 +71,7 @@ void rand_system()
     seed = 0;
 #endif
     // generate random matrix entries
+    // Parallelize the for loops
     #pragma omp for
     for (int row = 0; row < n; row++) {
         int col = triangular_mode ? row : 0;
@@ -83,6 +87,7 @@ void rand_system()
     }
 
     // generate right-hand side such that the solution matrix is all 1s
+    // Parallelize the for loops
     #pragma omp for
     for (int row = 0; row < n; row++) {
         b[row] = 0.0;
@@ -144,8 +149,7 @@ void read_system(const char *fn)
  */
 void gaussian_elimination()
 {
-//#pragma omp parallel for default(none) \
-    //shared(n, b, A)
+    // Gaussian elimination for loopss. Parallelized on the first nested for loop.
     for (int pivot = 0; pivot < n; pivot++) {
        #pragma omp parallel for default(none) shared(A, b, n, pivot)
        for (int row = pivot+1; row < n; row++) {
@@ -166,6 +170,7 @@ void gaussian_elimination()
 void back_substitution_row()
 {
     REAL tmp;
+    // Parallelize the for loop
     #pragma omp for
     for (int row = n-1; row >= 0; row--) {
         tmp = b[row];
@@ -182,6 +187,7 @@ void back_substitution_row()
  */
 void back_substitution_column()
 {
+    // Both for loops are parallelized.
     #pragma omp for
     for (int row = 0; row < n; row++) {
         x[row] = b[row];
