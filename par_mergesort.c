@@ -5,6 +5,32 @@
  * OpenMP parallelized version
  * Authors: Georgia Corey & Justin Mikesell
  * Compile with --std=c99
+ *
+ * rand_system() analysis: We set up a parallel construct to execute the two for loops within 
+ * the function to define the shared variables (there were no private variables). We then created
+ * two parallel loops which specified that the loop iterations would be distributed among and 
+ * executed by all threads passed to it. Additionally, we added in an OpenMP check to set seed to 
+ * the number of threads if it was being executed in OpenMP, otherwise, seed was initialized to 0. 
+ * As a result of this, seed became the function’s only private variable. In terms of scaling, if 
+ * the thread count increases and the matrix is at 500, there is speedup up until 8 threads, where
+ * it levels out at about 0.0006.
+ *
+ * gausssian_elimination() analysis: For this function, we had to declare the parallel for loop inside
+ * of the first for loop. We at first attempted a collapse, however, this gave us severely inaccurate 
+ * results and no scaling of any kind. Another attempt we made to achieve optimal parallelization was 
+ * to make one or more variables private, but like the attempt at collapsing the nested for loops, this
+ * almost provided inaccurate results with no scaling. We also tried to use a reduction clause, which 
+ * seemed to make the program take longer and lost all scaling. We found that using a parallel for 
+ * declaration was the best method to achieve optimal parallelization in this function. In terms of 
+ * scaling at a matrix size of 500, the function demonstrated strong scaling throughout, almost linear.
+ *
+ * back_substitution_ row() and back_substitution_col() analysis: We struggled a decent amount to try and
+ * parallelize these functions. In our many attempts we tried to use a pragma omp parallel for which showed
+ * strong scaling for the function, but created incorrect results. We then tried to implement it using a 
+ * seperate pragma omp parallel and then pragma omp for but we got the incorrect results. In an attempt 
+ * to get something working we placed pragma omp for’s at each for loop, but that did not improve scaling, 
+ * however it still created correct results.
+ *
  */
 
 #include <getopt.h>
@@ -57,22 +83,22 @@ void rand_system()
 
     // initialize pseudorandom number generator
     // (see https://en.wikipedia.org/wiki/Linear_congruential_generator)
- 
+
     // Parallelize the function
-    #pragma omp parallel default(none) \
+ #  pragma omp parallel default(none) \
     shared(A,b, x, n, triangular_mode)
     {
 // Assign seed to its own thread if OpenMP is running
 // Otherwise, initialize seed to 0.
     unsigned long seed;
-#ifdef _OPENMP
+#   ifdef _OPENMP
     seed = omp_get_thread_num();
-#else
+#   else
     seed = 0;
-#endif
+#   endif
     // generate random matrix entries
     // Parallelize the for loops
-    #pragma omp for
+#   pragma omp for
     for (int row = 0; row < n; row++) {
         int col = triangular_mode ? row : 0;
        for (; col < n; col++) {
@@ -88,7 +114,7 @@ void rand_system()
 
     // generate right-hand side such that the solution matrix is all 1s
     // Parallelize the for loops
-    #pragma omp for
+#   pragma omp for
     for (int row = 0; row < n; row++) {
         b[row] = 0.0;
         for (int col = 0; col < n; col++) {
@@ -149,9 +175,9 @@ void read_system(const char *fn)
  */
 void gaussian_elimination()
 {
-    // Gaussian elimination for loopss. Parallelized on the first nested for loop.
-    for (int pivot = 0; pivot < n; pivot++) {
-       #pragma omp parallel for default(none) shared(A, b, n, pivot)
+   // Gaussian elimination for loopss. Parallelized on the first nested for loop.
+   for (int pivot = 0; pivot < n; pivot++) {
+#      pragma omp parallel for default(none) shared(A, b, n, pivot)
        for (int row = pivot+1; row < n; row++) {
             REAL coeff = A[row*n + pivot] / A[pivot*n + pivot];
             A[row*n + pivot] = 0.0;
@@ -171,7 +197,7 @@ void back_substitution_row()
 {
     REAL tmp;
     // Parallelize the for loop
-    #pragma omp for
+#   pragma omp for
     for (int row = n-1; row >= 0; row--) {
         tmp = b[row];
         for (int col = row+1; col < n; col++) {
@@ -188,11 +214,11 @@ void back_substitution_row()
 void back_substitution_column()
 {
     // Both for loops are parallelized.
-    #pragma omp for
+#   pragma omp for
     for (int row = 0; row < n; row++) {
         x[row] = b[row];
     }
-    #pragma omp for
+#   pragma omp for
     for (int col = n-1; col >= 0; col--) {
         x[col] /= A[col*n + col];
         for (int row = 0; row < col; row++) {
@@ -234,11 +260,11 @@ int main(int argc, char *argv[])
 {
     // check and parse command line options
     int threads;
-    #ifdef _OPENMP
+#   ifdef _OPENMP
     threads = omp_get_max_threads();
-    #else
+#   else
     threads = 0;
-    #endif
+#   endif
     int c;
     while ((c = getopt(argc, argv, "dt")) != -1) {
         switch (c) {
